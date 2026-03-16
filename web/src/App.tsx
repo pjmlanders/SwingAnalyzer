@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react'
+import { useState, useRef, useCallback, useEffect } from 'react'
 import { CameraView } from './components/CameraView'
 import { PoseOverlay } from './components/PoseOverlay'
 import { RoiSelector, type Roi } from './components/RoiSelector'
@@ -7,6 +7,7 @@ import { AIFeedbackPanel } from './components/AIFeedbackPanel'
 import { FrameBuffer } from './lib/frameBuffer'
 import { analyzeSwing, createContactDetectorState } from './lib/swingAnalyzer'
 import type { PoseLandmarks, SwingAnalysis } from './types/pose'
+import type { Sport, Handedness } from './types/fundamentals'
 import './App.css'
 
 function App() {
@@ -18,22 +19,32 @@ function App() {
   const [roi, setRoi] = useState<Roi | null>(null)
   const [roiDrawing, setRoiDrawing] = useState(false)
 
+  // Sport and handedness context — threads through the entire app
+  const [sport, setSport] = useState<Sport>('baseball')
+  const [handedness, setHandedness] = useState<Handedness>('right')
+
   // Speed multiplier: 1 for live camera, auto-detected or user-selectable for uploads
   const [isLiveCamera, setIsLiveCamera] = useState(true)
   const [detectedFps, setDetectedFps] = useState<number | null>(null)
   const [isSlowMo, setIsSlowMo] = useState(false)
   const [slowMoFactor, setSlowMoFactor] = useState(4)
+  const [videoElement, setVideoElement] = useState<HTMLVideoElement | null>(null)
 
   // Auto-set slow-mo from detected FPS, or use manual toggle
   const autoMultiplier = detectedFps && detectedFps > 60 ? Math.round(detectedFps / 30) : 1
   const speedMultiplier = isLiveCamera ? 1 : isSlowMo ? slowMoFactor : autoMultiplier
 
-  const videoElementRef = useRef<HTMLVideoElement | null>(null)
-
   const frameBufferRef = useRef(new FrameBuffer())
   const contactStateRef = useRef(createContactDetectorState())
+
+  // Stable refs for values used inside the handlePoseResults callback
   const speedMultiplierRef = useRef(speedMultiplier)
-  speedMultiplierRef.current = speedMultiplier
+  const sportRef = useRef(sport)
+  const handednessRef = useRef(handedness)
+
+  useEffect(() => { speedMultiplierRef.current = speedMultiplier }, [speedMultiplier])
+  useEffect(() => { sportRef.current = sport }, [sport])
+  useEffect(() => { handednessRef.current = handedness }, [handedness])
 
   const handleFpsDetected = useCallback((fps: number | null) => {
     if (fps === 0) {
@@ -77,6 +88,8 @@ function App() {
         frameBufferRef.current,
         contactStateRef.current,
         speedMultiplierRef.current,
+        handednessRef.current,
+        sportRef.current,
       )
       contactStateRef.current = result.contactState
       setSwingAnalysis(result.analysis)
@@ -93,6 +106,40 @@ function App() {
       <header className="app-header">
         <h1>Swing Analyzer</h1>
         <p>Real-time baseball &amp; golf swing analysis</p>
+        <div className="context-toggles">
+          <div className="toggle-group">
+            <button
+              type="button"
+              className={`toggle-btn ${sport === 'baseball' ? 'active' : ''}`}
+              onClick={() => setSport('baseball')}
+            >
+              Baseball
+            </button>
+            <button
+              type="button"
+              className={`toggle-btn ${sport === 'golf' ? 'active' : ''}`}
+              onClick={() => setSport('golf')}
+            >
+              Golf
+            </button>
+          </div>
+          <div className="toggle-group">
+            <button
+              type="button"
+              className={`toggle-btn ${handedness === 'right' ? 'active' : ''}`}
+              onClick={() => setHandedness('right')}
+            >
+              Right-handed
+            </button>
+            <button
+              type="button"
+              className={`toggle-btn ${handedness === 'left' ? 'active' : ''}`}
+              onClick={() => setHandedness('left')}
+            >
+              Left-handed
+            </button>
+          </div>
+        </div>
       </header>
 
       <main className="app-main">
@@ -103,7 +150,7 @@ function App() {
               onVideoDimensions={setVideoDims}
               onAllPoses={handleAllPoses}
               onFpsDetected={handleFpsDetected}
-              onVideoElement={(el) => { videoElementRef.current = el }}
+              onVideoElement={setVideoElement}
               roi={roi}
             >
               <PoseOverlay
@@ -112,6 +159,8 @@ function App() {
                 selectedIndex={selectedPoseIndex}
                 width={videoDims.width}
                 height={videoDims.height}
+                handedness={handedness}
+                sport={sport}
               />
               <RoiSelector
                 roi={roi}
@@ -167,11 +216,18 @@ function App() {
             </div>
           )}
         </div>
-        <MetricsPanel landmarks={landmarks} swingAnalysis={swingAnalysis} />
+        <MetricsPanel
+          landmarks={landmarks}
+          swingAnalysis={swingAnalysis}
+          sport={sport}
+          handedness={handedness}
+        />
         <AIFeedbackPanel
           landmarks={landmarks}
           swingAnalysis={swingAnalysis}
-          videoElement={videoElementRef.current}
+          videoElement={videoElement}
+          sport={sport}
+          handedness={handedness}
         />
       </main>
 

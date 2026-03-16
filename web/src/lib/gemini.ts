@@ -1,5 +1,5 @@
 /**
- * Gemini AI integration for baseball swing coaching feedback.
+ * Gemini AI integration for baseball/golf swing coaching feedback.
  * Sends a video frame snapshot + computed pose metrics to Gemini
  * and returns structured coaching feedback.
  *
@@ -9,6 +9,7 @@
 import { GoogleGenerativeAI } from '@google/generative-ai'
 import type { SwingMetrics } from './angles'
 import type { SwingAnalysis } from '../types/pose'
+import type { ScoredMetric, Sport, Handedness } from '../types/fundamentals'
 
 const GEMINI_MODEL = 'gemini-2.5-flash'
 
@@ -49,12 +50,17 @@ function buildPrompt(
   metrics: SwingMetrics,
   swing: SwingAnalysis | null,
   mode: CoachingMode,
-  ruleFeedback: string[],
+  sport: Sport,
+  handedness: Handedness,
+  scoredMetrics: ScoredMetric[],
 ): string {
+  const sportLabel = sport === 'golf' ? 'golf' : 'baseball'
+  const handednessLabel = handedness === 'right' ? 'right-handed' : 'left-handed'
+
   const persona =
     mode === 'player'
-      ? 'You are an encouraging baseball hitting coach giving feedback directly to a player. Use plain language. Be concise and actionable — the player is on a baseball field right now.'
-      : 'You are an expert hitting coach analyzing swing biomechanics. Use proper baseball and biomechanics terminology. Be precise and data-driven.'
+      ? `You are an encouraging ${sportLabel} coach giving feedback directly to a ${handednessLabel} player. Use plain language. Be concise and actionable — the player is on the field right now.`
+      : `You are an expert ${sportLabel} hitting coach analyzing swing biomechanics for a ${handednessLabel} player. Use proper ${sportLabel} and biomechanics terminology. Be precise and data-driven.`
 
   const metricsBlock = [
     `Hip-Shoulder Separation (X-factor): ${metrics.hipShoulderSeparation.toFixed(1)}°`,
@@ -62,7 +68,7 @@ function buildPrompt(
     `Rear Elbow Angle: ${metrics.rearElbowAngle.toFixed(1)}°`,
     `Lead Knee Angle: ${metrics.leadKneeAngle.toFixed(1)}°`,
     `Rear Knee Angle: ${metrics.rearKneeAngle.toFixed(1)}°`,
-    `Estimated Bat Angle: ${metrics.batAngle.toFixed(1)}°`,
+    `Estimated Bat/Club Angle (forearm): ${metrics.batAngle.toFixed(1)}°`,
     `Hand Height (normalized, 0=shoulder level): ${metrics.handHeight.toFixed(2)}`,
     `Stance Width (relative to hip width): ${metrics.stanceWidth.toFixed(2)}x`,
   ].join('\n')
@@ -79,9 +85,22 @@ function buildPrompt(
         .join('\n')
     : 'Swing dynamics not yet captured.'
 
+  const fundamentalsBlock = scoredMetrics.length > 0
+    ? scoredMetrics
+        .map((sm) => {
+          const badge = (sm.score === 'ideal' || sm.score === 'acceptable_low' || sm.score === 'acceptable_high') ? '✓' : '△'
+          return `${badge} ${sm.rule.label} (${sm.value.toFixed(1)} ${sm.rule.unit}): ${sm.feedback} [Source: ${sm.rule.source}]`
+        })
+        .join('\n')
+    : null
+
   return `${persona}
 
-Analyze this baseball swing. Metrics were captured from a live phone camera using MediaPipe pose estimation.
+Analyze this ${sportLabel} swing for a ${handednessLabel} player. Metrics were captured from a phone camera using MediaPipe pose estimation.
+
+PLAYER CONTEXT:
+Sport: ${sportLabel}
+Handedness: ${handednessLabel}
 
 POSE METRICS:
 ${metricsBlock}
@@ -91,10 +110,10 @@ ${dynamicsBlock}
 
 ${swing?.contactDetected ? 'A contact point was detected in this swing.' : ''}
 
-${ruleFeedback.length > 0 ? `RULE-BASED ANALYSIS (already shown to the user):
-${ruleFeedback.map((f) => `- ${f}`).join('\n')}
+${fundamentalsBlock ? `BIOMECHANICS ANALYSIS (already shown to the player — sourced from peer-reviewed research):
+${fundamentalsBlock}
 
-Your analysis must be consistent with these observations. Do not contradict them. You may expand on them, add nuance, or cover areas they do not address.` : ''}
+Your analysis must be consistent with these observations. Do not contradict them. You may expand, add nuance, or cover areas not yet addressed.` : ''}
 
 If a frame image is provided, use it to supplement your analysis of posture and mechanics.
 
@@ -113,7 +132,7 @@ Guidelines:
 - score: 8-10 = strong mechanics, 6-7 = solid with minor fixes, 4-5 = needs work, 1-3 = significant issues
 - 2-3 strengths, 2-3 improvements
 - 2-4 drills, each with 2-4 steps
-- All feedback must be immediately actionable on a baseball field`
+- All feedback must be immediately actionable`
 }
 
 /**
@@ -125,7 +144,9 @@ export async function analyzeSwingWithAI(
   swingAnalysis: SwingAnalysis | null,
   imageDataUrl: string | null,
   mode: CoachingMode = 'player',
-  ruleFeedback: string[] = [],
+  sport: Sport = 'baseball',
+  handedness: Handedness = 'right',
+  scoredMetrics: ScoredMetric[] = [],
 ): Promise<AISwingFeedback> {
   const apiKey = import.meta.env.VITE_GEMINI_API_KEY
   if (!apiKey) {
@@ -134,7 +155,7 @@ export async function analyzeSwingWithAI(
 
   const genAI = new GoogleGenerativeAI(apiKey)
   const model = genAI.getGenerativeModel({ model: GEMINI_MODEL })
-  const prompt = buildPrompt(metrics, swingAnalysis, mode, ruleFeedback)
+  const prompt = buildPrompt(metrics, swingAnalysis, mode, sport, handedness, scoredMetrics)
 
   let result
   if (imageDataUrl) {

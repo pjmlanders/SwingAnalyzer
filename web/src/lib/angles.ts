@@ -4,6 +4,7 @@
  */
 
 import type { Landmark, PoseLandmarks } from '../types/pose'
+import type { Handedness } from '../types/fundamentals'
 
 // MediaPipe pose landmark indices
 export const LANDMARKS = {
@@ -146,21 +147,28 @@ export function hipAngle(landmarks: PoseLandmarks, side: 'left' | 'right'): numb
 }
 
 /**
- * Estimate bat angle from wrist positions.
- * Assumes bat extends from hands - angle of line between wrists.
+ * Estimate bat/club angle from the rear forearm direction.
+ * More accurate than wrist-to-wrist: the bat barrel extends along the rear forearm axis.
+ *
+ * For right-handed: rear side = right (rightElbow → rightWrist).
+ * For left-handed:  rear side = left  (leftElbow → leftWrist).
  */
-export function estimatedBatAngle(landmarks: PoseLandmarks): number {
-  const leftWrist = landmarks[LANDMARKS.LEFT_WRIST]
-  const rightWrist = landmarks[LANDMARKS.RIGHT_WRIST]
+export function forearmBatAngle(landmarks: PoseLandmarks, handedness: Handedness = 'right'): number {
+  const rearSide = handedness === 'right' ? 'right' : 'left'
+  const elbowIdx = rearSide === 'right' ? LANDMARKS.RIGHT_ELBOW : LANDMARKS.LEFT_ELBOW
+  const wristIdx = rearSide === 'right' ? LANDMARKS.RIGHT_WRIST : LANDMARKS.LEFT_WRIST
 
-  if (!leftWrist || !rightWrist) return 0
+  const elbow = landmarks[elbowIdx]
+  const wrist = landmarks[wristIdx]
 
-  return lineAngle(leftWrist, rightWrist)
+  if (!elbow || !wrist) return 0
+
+  return lineAngle(elbow, wrist)
 }
 
 /**
- * Hand position height relative to shoulders (for swing phase detection).
- * Returns value from -1 (hands at hips) to 1 (hands above head).
+ * Hand position height relative to shoulders.
+ * Returns: 0 = shoulder level, negative = above shoulders, positive = below shoulders.
  */
 export function handHeight(landmarks: PoseLandmarks): number {
   const leftWrist = landmarks[LANDMARKS.LEFT_WRIST]
@@ -214,16 +222,24 @@ export interface SwingMetrics {
 
 /**
  * Calculate all swing metrics from landmarks.
- * Assumes right-handed batter (left side = lead, right side = rear).
+ * Lead/rear sides are resolved from handedness:
+ *   right-handed → lead = left, rear = right
+ *   left-handed  → lead = right, rear = left
  */
-export function calculateSwingMetrics(landmarks: PoseLandmarks): SwingMetrics {
+export function calculateSwingMetrics(
+  landmarks: PoseLandmarks,
+  handedness: Handedness = 'right',
+): SwingMetrics {
+  const leadSide = handedness === 'right' ? 'left' : 'right'
+  const rearSide = handedness === 'right' ? 'right' : 'left'
+
   return {
     hipShoulderSeparation: hipShoulderSeparation(landmarks),
-    leadElbowAngle: elbowAngle(landmarks, 'left'),
-    rearElbowAngle: elbowAngle(landmarks, 'right'),
-    leadKneeAngle: kneeAngle(landmarks, 'left'),
-    rearKneeAngle: kneeAngle(landmarks, 'right'),
-    batAngle: estimatedBatAngle(landmarks),
+    leadElbowAngle: elbowAngle(landmarks, leadSide),
+    rearElbowAngle: elbowAngle(landmarks, rearSide),
+    leadKneeAngle: kneeAngle(landmarks, leadSide),
+    rearKneeAngle: kneeAngle(landmarks, rearSide),
+    batAngle: forearmBatAngle(landmarks, handedness),
     handHeight: handHeight(landmarks),
     stanceWidth: stanceWidth(landmarks),
   }

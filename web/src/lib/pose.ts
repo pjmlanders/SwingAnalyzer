@@ -1,6 +1,10 @@
 /**
  * Pose estimation using MediaPipe PoseLandmarker.
  * Processes video frames and returns 33 keypoints for body pose.
+ *
+ * The FilesetResolver vision instance is exposed via getVisionInstance()
+ * so that other detectors (e.g. HandLandmarker) can reuse it without a
+ * second CDN fetch.
  */
 
 import {
@@ -20,6 +24,16 @@ export type PoseResultsCallback = (results: PoseResult) => void
 
 let poseLandmarker: PoseLandmarker | null = null
 let lastVideoTime = -1
+/** Shared vision instance — reused by HandLandmarker to avoid a second CDN fetch. */
+let visionInstance: Awaited<ReturnType<typeof FilesetResolver.forVisionTasks>> | null = null
+
+/**
+ * Returns the FilesetResolver vision instance once pose detection has been
+ * initialised.  Returns null before the first createPoseDetector() call.
+ */
+export function getVisionInstance() {
+  return visionInstance
+}
 
 /**
  * Initialize the MediaPipe PoseLandmarker.
@@ -29,11 +43,11 @@ export async function createPoseDetector(): Promise<PoseLandmarker | null> {
   if (poseLandmarker) return poseLandmarker
 
   try {
-    const vision = await FilesetResolver.forVisionTasks(
+    visionInstance = await FilesetResolver.forVisionTasks(
       'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm'
     )
 
-    poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
+    poseLandmarker = await PoseLandmarker.createFromOptions(visionInstance, {
       baseOptions: {
         modelAssetPath:
           'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/1/pose_landmarker_full.task',

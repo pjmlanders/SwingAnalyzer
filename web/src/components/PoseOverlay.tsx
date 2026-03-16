@@ -6,6 +6,7 @@
 
 import { useRef, useEffect } from 'react'
 import type { PoseLandmarks } from '../types/pose'
+import type { Handedness, Sport } from '../types/fundamentals'
 import { estimateBatTip } from '../lib/swingAnalyzer'
 
 interface PoseOverlayProps {
@@ -14,6 +15,8 @@ interface PoseOverlayProps {
   selectedIndex?: number
   width: number
   height: number
+  handedness?: Handedness
+  sport?: Sport
 }
 
 // MediaPipe pose connections (pairs of landmark indices)
@@ -90,20 +93,27 @@ function drawBat(
   pose: PoseLandmarks,
   width: number,
   height: number,
+  handedness: Handedness,
+  sport: Sport,
 ) {
-  const lw = pose[15] // LEFT_WRIST
-  const rw = pose[16] // RIGHT_WRIST
-  if (!lw || !rw) return
+  // Use the rear wrist as the grip anchor (more accurate than midpoint for forearm axis)
+  const rearWristIdx = handedness === 'right' ? 16 : 15 // RIGHT_WRIST : LEFT_WRIST
+  const leadWristIdx = handedness === 'right' ? 15 : 16 // LEFT_WRIST : RIGHT_WRIST
 
-  const lwVis = lw.visibility ?? 1
-  const rwVis = rw.visibility ?? 1
-  if (lwVis < 0.5 || rwVis < 0.5) return
+  const rearWrist = pose[rearWristIdx]
+  const leadWrist = pose[leadWristIdx]
+  if (!rearWrist || !leadWrist) return
 
-  const batTip = estimateBatTip(pose)
+  const rearVis = rearWrist.visibility ?? 1
+  const leadVis = leadWrist.visibility ?? 1
+  if (rearVis < 0.5 || leadVis < 0.5) return
+
+  const batTip = estimateBatTip(pose, handedness, sport)
   if (!batTip) return
 
-  const gripX = ((lw.x + rw.x) / 2) * width
-  const gripY = ((lw.y + rw.y) / 2) * height
+  // Draw from midpoint of wrists to tip
+  const gripX = ((rearWrist.x + leadWrist.x) / 2) * width
+  const gripY = ((rearWrist.y + leadWrist.y) / 2) * height
   const tipX = batTip.x * width
   const tipY = batTip.y * height
 
@@ -111,7 +121,7 @@ function drawBat(
   ctx.strokeStyle = '#ffaa44'
   ctx.lineWidth = 4
   ctx.lineCap = 'round'
-  ctx.globalAlpha = Math.min(lwVis, rwVis)
+  ctx.globalAlpha = Math.min(rearVis, leadVis)
 
   ctx.beginPath()
   ctx.moveTo(gripX, gripY)
@@ -127,7 +137,15 @@ function drawBat(
   ctx.restore()
 }
 
-export function PoseOverlay({ landmarks, allPoses, selectedIndex, width, height }: PoseOverlayProps) {
+export function PoseOverlay({
+  landmarks,
+  allPoses,
+  selectedIndex,
+  width,
+  height,
+  handedness = 'right',
+  sport = 'baseball',
+}: PoseOverlayProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
 
   useEffect(() => {
@@ -153,11 +171,11 @@ export function PoseOverlay({ landmarks, allPoses, selectedIndex, width, height 
     // Draw selected pose on top
     if (poses[selIdx]?.length) {
       drawPose(ctx, poses[selIdx], width, height, true)
-      drawBat(ctx, poses[selIdx], width, height)
+      drawBat(ctx, poses[selIdx], width, height, handedness, sport)
     }
 
     ctx.globalAlpha = 1
-  }, [landmarks, allPoses, selectedIndex, width, height])
+  }, [landmarks, allPoses, selectedIndex, width, height, handedness, sport])
 
   const hasPoses = (allPoses && allPoses.length > 0) || (landmarks && landmarks.length > 0)
   if (!hasPoses) return null

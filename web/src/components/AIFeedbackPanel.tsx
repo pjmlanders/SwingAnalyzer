@@ -13,17 +13,26 @@ import {
   type CoachingMode,
 } from '../lib/gemini'
 import { calculateSwingMetrics } from '../lib/angles'
-import { getSwingFeedback } from './MetricsPanel'
+import { buildFeedback } from '../lib/fundamentalsEngine'
 import type { PoseLandmarks } from '../types/pose'
 import type { SwingAnalysis } from '../types/pose'
+import type { Sport, Handedness } from '../types/fundamentals'
 
 interface AIFeedbackPanelProps {
   landmarks: PoseLandmarks | null
   swingAnalysis: SwingAnalysis | null
   videoElement: HTMLVideoElement | null
+  sport: Sport
+  handedness: Handedness
 }
 
-export function AIFeedbackPanel({ landmarks, swingAnalysis, videoElement }: AIFeedbackPanelProps) {
+export function AIFeedbackPanel({
+  landmarks,
+  swingAnalysis,
+  videoElement,
+  sport,
+  handedness,
+}: AIFeedbackPanelProps) {
   const [mode, setMode] = useState<CoachingMode>('player')
   const [loading, setLoading] = useState(false)
   const [feedback, setFeedback] = useState<AISwingFeedback | null>(null)
@@ -34,22 +43,30 @@ export function AIFeedbackPanel({ landmarks, swingAnalysis, videoElement }: AIFe
   const handleAnalyze = useCallback(async () => {
     if (!landmarks || landmarks.length < 33) return
 
-    const metrics = calculateSwingMetrics(landmarks)
-    const ruleFeedback = getSwingFeedback(metrics, swingAnalysis)
+    const metrics = calculateSwingMetrics(landmarks, handedness)
+    const scoredMetrics = buildFeedback(metrics, swingAnalysis?.phase ?? 'idle', sport, handedness)
     const imageDataUrl = videoElement ? captureVideoFrame(videoElement) : null
 
     setLoading(true)
     setError(null)
 
     try {
-      const result = await analyzeSwingWithAI(metrics, swingAnalysis, imageDataUrl, mode, ruleFeedback)
+      const result = await analyzeSwingWithAI(
+        metrics,
+        swingAnalysis,
+        imageDataUrl,
+        mode,
+        sport,
+        handedness,
+        scoredMetrics,
+      )
       setFeedback(result)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Analysis failed. Please try again.')
     } finally {
       setLoading(false)
     }
-  }, [landmarks, swingAnalysis, videoElement, mode])
+  }, [landmarks, swingAnalysis, videoElement, mode, sport, handedness])
 
   if (!isGeminiAvailable()) {
     return (
